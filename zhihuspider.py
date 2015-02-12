@@ -76,7 +76,7 @@ class ZhihuSpider(object):
             log_main.info('Login successfully!')
         else:
             log_main.info('Faile to Login! Exit.')
-            exit(-1)
+            sys.exit(-1)
 
     def crawl_questions(self, start=None, offset=None):
         """抓取知乎问题"""
@@ -95,27 +95,6 @@ class ZhihuSpider(object):
             except Exception as e:
                 log_main.error('Failed to fetch question page. Error: {0}. Exit'.format(e))
                 sys.exit(-1)
-
-            # try:
-            #     html_con = etree.HTML(res.text)
-            # except Exception as e:
-            #     log_main.error('Failed to construct dom tree when fetching question page. Error: {0}'.format(e))
-            #     sys.exit(-1)
-
-            # nodes_item = html_con.xpath("//div[@id='zh-global-logs-questions-wrap']/div")
-
-            # log_main.info('nods_item: {0}'.format(nodes_item))
-
-            # for node_item in nodes_item:
-            #     title = node_item.xpath("./h2/a")[0].text
-            #     url = node_item.xpath("./h2/a")[0].xpath("@href")[0]
-            #     url = urllib.parse.urljoin(self.url_question_prefix, url)
-
-            #     last_id = node_item.xpath("@id")[0]
-                
-            #     log_main.info('title: {0}, url: {1}'.format(title, url))
-
-            # start = last_id.split('-')[-1]
 
             start = self._parse_json(res.text)
         

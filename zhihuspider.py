@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+# coding=utf-8
 # --------------------------------------------
 # Author: flyer <flyer103@gmail.com>
 # Date: 2015-01-23 22:48:36
@@ -12,6 +12,7 @@ import os
 import sys
 import json
 import urllib
+import re
 
 import yaml
 import requests
@@ -56,6 +57,8 @@ class ZhihuSpider(object):
         self.offset = self.configs['OFFSET']
 
         self.spider = requests.Session()
+        self.xsrf = ""
+        self.ck = ""
 
         
     def login(self):
@@ -77,6 +80,8 @@ class ZhihuSpider(object):
         else:
             log_main.info('Faile to Login! Exit.')
             sys.exit(-1)
+        print self.spider.cookies
+        self.ck = self.spider.cookies
 
     def crawl_questions(self, start=None, offset=None):
         """抓取知乎问题"""
@@ -86,7 +91,7 @@ class ZhihuSpider(object):
         while True:
             self.payload_question['start'] = start
             self.payload_question['offset'] = offset
-            
+
             try:
                 res = self.spider.post(self.url_questions,
                                        headers=self.headers_base,
@@ -102,10 +107,11 @@ class ZhihuSpider(object):
     def run(self):
         """总控"""
         self.login()
+        self.get_hot_daily()
 
-        start = self._crawl_first_question()
-
-        self.crawl_questions(start=start, offset=self.offset)
+        # start = self._crawl_first_question()
+        #
+        # self.crawl_questions(start=start, offset=self.offset)
         
 
     def _get_xsrf(self, url=None):
@@ -128,7 +134,7 @@ class ZhihuSpider(object):
         xsrf = node_xsrf.xpath("@value")[0]
 
         log_main.info('xsrf for {0}: {1}'.format(url, xsrf))
-
+        self.xsrf = xsrf
         return xsrf
 
     def _test_login(self):
@@ -158,8 +164,7 @@ class ZhihuSpider(object):
         else:
             return False
 
-    def _crawl_first_question(self):
-        """抓取知乎问题首页第一个问题的编号"""
+    def get_hot_daily(self):
         try:
             res = self.spider.get(self.url_questions,
                                   headers=self.headers_base,
@@ -174,13 +179,72 @@ class ZhihuSpider(object):
             log_main.error('Failed to construct dom tree when fetching question page. Error: {0}'.format(e))
             sys.exit(-1)
 
-        node_item = html_con.xpath("//div[@id='zh-global-logs-questions-wrap']/div")[0]
+        node_item = html_con.xpath("//div[@data-type='daily']/div")
+        f = file("zhihu_question.list", 'a')
+        for node in node_item:
+            question_id = node.xpath("./h2/a/@href")[0].split('/')[2]
+            q_url = self.url_question_prefix + '/question/' + question_id
+            print q_url
 
-        _id = node_item.xpath("@id")[0].split('-')[-1]
+            try:
+                question_res = self.spider.get(q_url,
+                                      headers=self.headers_base,
+                                      timeout=self.timeout_query)
+            except Exception as e:
+                log_main.error('Failed to fetch {0}. Error: {1}'.format(q_url, e))
+                sys.exit(-1)
 
-        log_main.info('the id of the first question is: {0}'.format(_id))
+            #获取qid
+            qid_re = re.findall(r''',"qid":([\d]+),''', question_res.text)[0]
+            print qid_re
 
-        return _id
+            #提交答案
+            try:
+                answer_payload = {
+                    '_xsrf':self.xsrf,
+                    'content':'fdsajlfkjdsa</br>',
+                    'qid':int(qid_re)
+                }
+                print answer_payload
+                answer_save = self.spider.post('http://www.zhihu.com/answer/draft/save',
+                                       headers=self.headers_base,
+                                       data=answer_payload,
+                                       timeout=self.timeout_query)
+            except Exception as e:
+                log_main.error('Failed to try to login. Error: {0}'.format(e))
+                sys.exit(-1)
+            print answer_save.text
+
+
+
+            # f.write(question_title + " | " + question_url + '\n')
+
+
+
+    # def _crawl_first_question(self):
+    #     """抓取知乎问题首页第一个问题的编号"""
+    #     try:
+    #         res = self.spider.get(self.url_questions,
+    #                               headers=self.headers_base,
+    #                               timeout=self.timeout_query)
+    #     except Exception as e:
+    #         log_main.error('Failed to fetch question page. Error: {0}. Exit'.format(e))
+    #         sys.exit(-1)
+    #
+    #     try:
+    #         html_con = etree.HTML(res.text)
+    #     except Exception as e:
+    #         log_main.error('Failed to construct dom tree when fetching question page. Error: {0}'.format(e))
+    #         sys.exit(-1)
+    #
+    #     node_item = html_con.xpath("//div[@data-type='daily']/div")[0]
+    #     print node_item
+    #
+    #     _id = node_item.xpath("@id")[0].split('-')[-1]
+    #
+    #     log_main.info('the id of the first question is: {0}'.format(_id))
+    #
+    #     return _id
 
     def _parse_json(self, string):
         res_json = json.loads(string)['msg']
@@ -197,14 +261,17 @@ class ZhihuSpider(object):
             
             title_node = node.xpath("./h2[@class='zm-item-title']/a")[0]
             question_url = title_node.xpath('@href')[0]
-            question_url = urllib.parse.urljoin(self.url_question_prefix, question_url)
+            # print self.url_question_prefix, question_url
+            question_url = urllib.basejoin(self.url_question_prefix, question_url)
+            # question_url = urllib.parse.urljoin(self.url_question_prefix, question_url)
             question_title = title_node.text
 
             try:
                 who_node = node.xpath("./div/a")[0]
                 who_name = who_node.text
                 who_url = who_node.xpath("@href")[0]
-                who_url = urllib.parse.urljoin(self.url_question_prefix, who_url)
+                # who_url = urllib.parse.urljoin(self.url_question_prefix, who_url)
+                who_url = urllib.basejoin(self.url_question_prefix, who_url)
             except Exception as e:
                 log_main.warning('Failed to get poster for {0}'.format(question_url))
                 who_name = ''
@@ -212,13 +279,15 @@ class ZhihuSpider(object):
             
             question_time = node.xpath(".//time")[0].text
 
-            msg = "quesion: {0}[{1}]. people: {2}[{3}]. time: {4}".format(question_title,
-                                                                          question_url,
-                                                                          who_name,
-                                                                          who_url,
-                                                                          question_time)
-
-            log_main.info(msg)
+            # msg = "quesion: {0}[{1}]. people: {2}[{3}]. time: {4}".format(question_title,
+            #                                                               question_url,
+            #                                                               who_name,
+            #                                                               who_url,
+            #                                                               question_time)
+            # log_main.info(msg)
+            f = file("zhihu_question.list", 'a')
+            print question_title, "|", question_url#, who_name, who_url, question_time
+            f.write(question_title + " | " + question_url + '\n')
 
         last_id = int(nodes[-1].xpath('@id')[0].split('-')[-1])
         
